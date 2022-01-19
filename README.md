@@ -1,6 +1,4 @@
-## Property-aware relation networks for few-shot molecular property prediction. NeurIPS 2021 (spot-light)
-
-This is the PyTorch implementation of ["Property-Aware Relation Networks (PAR) for Few-Shot Molecular Property Prediction"](https://papers.nips.cc/paper/2021/hash/91bc333f6967019ac47b49ca0f2fa757-Abstract.html) published in NeurIPS 2021 as a spotlight paper. 
+This is the PyTorch implementation of ["Property-Aware Relation Networks (PAR) for Few-Shot Molecular Property Prediction (spotlight)"](https://papers.nips.cc/paper/2021/hash/91bc333f6967019ac47b49ca0f2fa757-Abstract.html) published in NeurIPS 2021 as a spotlight paper. 
 We will also release a PaddlePaddle implementation soon. 
 
 <p align="center"><img src="PAR-thumbnail.png" alt="logo" width="400px" />
