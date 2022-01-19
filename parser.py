@@ -10,7 +10,6 @@ from chem_lib.utils import init_trial_path
 
 def get_parser(root_dir='.'):
     parser = argparse.ArgumentParser(description='Property-Aware Relation Networks for Few-Shot Molecular Property Prediction')
-    parser.add_argument('--setting', type=str, default='pre_par') #choices=['par','pre_par']
     # dataset
     parser.add_argument('-r', '--root-dir', type=str, default=root_dir, help='root-dir')
     parser.add_argument('-d', '--dataset', type=str, default='tox21', help='data set name')  # ['tox21','sider','muv','toxcast']
@@ -32,8 +31,8 @@ def get_parser(root_dir='.'):
     parser.add_argument("--weight_decay", type=float, default=5e-5,
                         help="Training: Meta learning weight_decay")  
     parser.add_argument("--inner-lr", type=float, default=0.1, help="Training: Inner loop learning rate")  # 0.01
-    parser.add_argument('--epochs', type=int, default=3000,
-                        help='number of epochs to train (default: 1000)')  # 2000
+    parser.add_argument('--epochs', type=int, default=5000,
+                        help='number of epochs to train (default: 5000)')  # 5000
     parser.add_argument('--update_step', type=int, default=1)  # 5
     parser.add_argument('--update_step_test', type=int, default=1)  # 10
     parser.add_argument('--inner_update_step', type=int, default=1)  # 10
@@ -70,12 +69,9 @@ def get_parser(root_dir='.'):
                    
     parser.add_argument('--ctx_head', type=int, default=2, help='context layer')
     ## relation graph
-    ### par
-    parser.add_argument("--rel_type", type=str, default='par', help="relation graph")
     parser.add_argument("--rel-hidden-dim", type=int, default=128, help="hidden dim for relation net")  # 32
     parser.add_argument("--rel-layer", type=int, default=2, help="number of layers for relation net")
     parser.add_argument("--rel-edge-layer", type=int, default=2, help="number of layers for relation edge update")  # 3
-    parser.add_argument("--rel-k", type=int, default=0, help="top-k selection for relation graph")
     parser.add_argument("--rel-res", type=float, default=0, help="residual weight of mapper and relation")
     parser.add_argument("--batch_norm", type=int, default=0, help="batch_norm or not")
     parser.add_argument("--rel_adj", type=str, default='sim', choices=['dist', 'sim'], help="edge update adjacent")
@@ -91,7 +87,7 @@ def get_parser(root_dir='.'):
 
     # other
     parser.add_argument('--seed', type=int, default=5, help="Seed for splitting the dataset.")
-    parser.add_argument('--cuda', type=int, default=0, help="Choose the number of GPU.")
+    parser.add_argument('--gpu_id', type=int, default=0, help="Choose the number of GPU.")
     parser.add_argument("--result_path", type=str, default=os.path.join(root_dir,'results'), help="result path")
     parser.add_argument("--eval_steps", type=int, default=10)
     parser.add_argument("--save-steps", type=int, default=2000, help="Training: Number of iterations between checkpoints")
@@ -100,30 +96,11 @@ def get_parser(root_dir='.'):
     return parser
 
 
-def get_default_args(args):
-    if args.setting =='par':
-        args.setting = 'our_nopre'
-    elif args.setting =='pre_par':
-        args.setting = 'our_pre'
-
-    if args.setting == 'our_pre':
-        args.pretrained = 1
-        args.setting = 'our'
-    elif args.setting == 'our_nopre':
-        args.pretrained = 0
-        args.setting = 'our'
-    if args.setting == 'our':
-        args.rel_type = 'par'
-
-    return args
-
 def get_args(root_dir='.',is_save=True):
     parser = get_parser(root_dir)
-    args = parser.parse_args()     
-    args = get_default_args(args)
+    args = parser.parse_args()
 
-    if args.rel_k==0:
-        args.rel_k= args.n_shot_train
+    args.rel_k= args.n_shot_train
     if args.pretrained:
         args.enc_layer = 5
         args.emb_dim =300
@@ -137,7 +114,7 @@ def get_args(root_dir='.',is_save=True):
     if args.map_layer<=0:
         args.map_dim = args.emb_dim
     args = init_trial_path(args,is_save)
-    device = "cuda:" + str(args.cuda) if torch.cuda.is_available() else "cpu"
+    device = "cuda:" + str(args.gpu_id) if torch.cuda.is_available() else "cpu"
     args.device = device
     print(args)
 

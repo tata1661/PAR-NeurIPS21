@@ -43,7 +43,7 @@ class Meta_Trainer(nn.Module):
         self.inner_update_step = args.inner_update_step
 
         self.trial_path = args.trial_path
-        trial_name = self.dataset + '_' + self.test_dataset + '@' + args.enc_gnn + '_' + args.rel_type
+        trial_name = self.dataset + '_' + self.test_dataset + '@' + args.enc_gnn
         print(trial_name)
         logger = Logger(self.trial_path + '/results.txt', title=trial_name)
         log_names = ['Epoch']

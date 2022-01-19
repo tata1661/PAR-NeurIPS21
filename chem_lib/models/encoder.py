@@ -339,9 +339,9 @@ class GNN_Encoder(torch.nn.Module):
         else:
             raise ValueError("Invalid graph pooling type.")
 
-    def from_pretrained(self, model_file, cuda_num):
+    def from_pretrained(self, model_file, gpu_id):
         if torch.cuda.is_available():
-            self.gnn.load_state_dict(torch.load(model_file, map_location='cuda:' + str(cuda_num)))
+            self.gnn.load_state_dict(torch.load(model_file, map_location='cuda:' + str(gpu_id)))
         else:
             self.gnn.load_state_dict(torch.load(model_file, map_location=torch.device('cpu')))
 
