@@ -222,7 +222,6 @@ class EdgeUpdateNetwork(nn.Module):
             mask = torch.zeros_like(adj_temp)
             mask = mask.scatter(1, indices, 1)
             mask = mask.reshape((n_q, n_edge, n1, n2))
-            # mask = ((mask + mask.transpose(2,3)) > 0).type(torch.float32)
             if self.activation == 'softmax':
                 adj_val = self.softmax_with_mask(adj_val, mask)
             else:
