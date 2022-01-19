@@ -10,7 +10,7 @@ from torchmetrics.functional import auroc
 from torch_geometric.data import DataLoader
 
 from .maml import MAML
-from ..datasets import sample_datasets, sample_meta_datasets, sample_test_datasets, MoleculeDataset
+from ..datasets import sample_meta_datasets, sample_test_datasets, MoleculeDataset
 from ..utils import Logger
 
 class Meta_Trainer(nn.Module):
@@ -37,7 +37,6 @@ class Meta_Trainer(nn.Module):
         self.emb_dim = args.emb_dim
 
         self.batch_task = args.batch_task
-        self.update_s_q = args.update_s_q
 
         self.update_step = args.update_step
         self.update_step_test = args.update_step_test
@@ -50,8 +49,6 @@ class Meta_Trainer(nn.Module):
         log_names = ['Epoch']
         log_names += ['AUC-' + str(t) for t in args.test_tasks]
         log_names += ['AUC-Avg', 'AUC-Mid','AUC-Best']
-        log_names += ['ADJ-' + str(t) for t in args.test_tasks]
-        log_names += ['ADJ-Avg']
         logger.set_names(log_names)
         self.logger = logger
 
@@ -99,25 +96,15 @@ class Meta_Trainer(nn.Module):
                 dataset = self.preload_train_data[task]
             else:
                 dataset = MoleculeDataset(self.data_dir + self.dataset + "/new/" + str(task + 1), dataset=self.dataset)
-            if self.update_s_q:
-                s_data, q_data, s_data_eval, q_data_eval = sample_meta_datasets(dataset, self.dataset, task,
-                                                                                self.n_shot_train, self.n_query)
-                s_data = self.loader_to_samples(s_data)
-                q_data = self.loader_to_samples(q_data)
-                s_data_eval = self.loader_to_samples(s_data_eval)
-                q_data_eval = self.loader_to_samples(q_data_eval)
 
-                adapt_data = {'s_data': s_data, 's_label': s_data.y, 'q_data': q_data, 'q_label': q_data.y,
-                              'label': torch.cat([s_data.y, q_data.y], 0), }
-                eval_data = {'s_data': s_data_eval, 's_label': s_data_eval.y, 'q_data': q_data_eval,
-                             'q_label': q_data_eval.y,
-                             'label': torch.cat([s_data_eval.y, q_data_eval.y], 0)}
-            else:
-                s_data, q_data = sample_datasets(dataset, self.dataset, task, self.n_shot, self.n_query)
-                s_data = self.loader_to_samples(s_data)
-                q_data = self.loader_to_samples(q_data)
-                adapt_data = {'data': s_data, 'label': s_data.y}
-                eval_data = {'data': q_data, 'label': q_data.y}
+            s_data, q_data = sample_meta_datasets(dataset, self.dataset, task,self.n_shot_train, self.n_query)
+
+            s_data = self.loader_to_samples(s_data)
+            q_data = self.loader_to_samples(q_data)
+
+            adapt_data = {'s_data': s_data, 's_label': s_data.y, 'q_data': q_data, 'q_label': q_data.y,
+                            'label': torch.cat([s_data.y, q_data.y], 0)}
+            eval_data = { }
         else:
             task = self.test_tasks[task_id]
             if 'train' in self.dataset:
@@ -144,31 +131,21 @@ class Meta_Trainer(nn.Module):
             s_data = self.loader_to_samples(s_data)
             q_loader = DataLoader(q_data, batch_size=self.n_query, shuffle=True, num_workers=0)
             q_loader_adapt = DataLoader(q_data_adapt, batch_size=self.n_query, shuffle=True, num_workers=0)
-            if self.update_s_q:
-                adapt_data = {'s_data': s_data, 's_label': s_data.y, 'data_loader': q_loader_adapt}
-                eval_data = {'s_data': s_data, 's_label': s_data.y, 'data_loader': q_loader}
-            else:
-                adapt_data = {'data_loader': [s_data]*self.update_step_test}
-                eval_data = {'data_loader': q_loader}
+
+            adapt_data = {'s_data': s_data, 's_label': s_data.y, 'data_loader': q_loader_adapt}
+            eval_data = {'s_data': s_data, 's_label': s_data.y, 'data_loader': q_loader}
+
         return adapt_data, eval_data
 
     def get_prediction(self, model, data, train=True):
         if train:
-            if self.update_s_q:
-                s_logits, q_logits, adj, node_emb = model(data['s_data'], data['q_data'], data['s_label'])
-                logits = torch.cat([s_logits, q_logits])
-                pred_dict = {'logits': logits, 's_logits': s_logits, 'q_logits': q_logits, 'adj': adj,
-                             'node_emb': node_emb}
-            else:
-                logits, node_emb = model.forward_one_batch(data['data'])
-                pred_dict = {'logits': logits, 'node_emb': node_emb}
+            s_logits, q_logits, adj, node_emb = model(data['s_data'], data['q_data'], data['s_label'])
+            pred_dict = {'s_logits': s_logits, 'q_logits': q_logits, 'adj': adj, 'node_emb': node_emb}
+
         else:
-            if self.update_s_q:
-                s_logits, logits,labels,adj_list,sup_labels = model.forward_query_loader(data['s_data'], data['data_loader'], data['s_label'])
-                pred_dict = {'s_logits':s_logits, 'logits': logits, 'labels': labels,'adj':adj_list,'sup_labels':sup_labels}
-            else:
-                logits,labels = model.forward_one_query_loader(data['data_loader'],device=self.device)
-                pred_dict = {'logits': logits, 'labels': labels}
+            s_logits, logits,labels,adj_list,sup_labels = model.forward_query_loader(data['s_data'], data['data_loader'], data['s_label'])
+            pred_dict = {'s_logits':s_logits, 'logits': logits, 'labels': labels,'adj':adj_list,'sup_labels':sup_labels}
+
         return pred_dict
 
     def get_adaptable_weights(self, model, adapt_weight=None):
@@ -207,12 +184,18 @@ class Meta_Trainer(nn.Module):
                     adaptable_names.append(name)
         return adaptable_weights
 
-    def get_loss(self, model, batch_data, pred_dict, train=True):
-        if not train and self.update_s_q:
-            losses_adapt = self.criterion(pred_dict['s_logits'], batch_data['s_label'])
+    def get_loss(self, model, batch_data, pred_dict, train=True, flag = 0):
+        n_support_train = self.args.n_shot_train
+        n_support_test = self.args.n_shot_test
+        n_query = self.args.n_query
+        if not train:
+            losses_adapt = self.criterion(pred_dict['s_logits'].reshape(2*n_support_test*n_query,2), batch_data['s_label'].repeat(n_query))
         else:
-            losses_adapt = self.criterion(pred_dict['logits'], batch_data['label'])
-        
+            if flag:
+                losses_adapt = self.criterion(pred_dict['s_logits'].reshape(2*n_support_train*n_query,2), batch_data['s_label'].repeat(n_query))
+            else:
+                losses_adapt = self.criterion(pred_dict['q_logits'], batch_data['q_label'])
+
         if torch.isnan(losses_adapt).any() or torch.isinf(losses_adapt).any():
             print('!!!!!!!!!!!!!!!!!!! Nan value for supervised CE loss', losses_adapt)
             print(pred_dict['s_logits'])
@@ -221,17 +204,20 @@ class Meta_Trainer(nn.Module):
             n_support = batch_data['s_label'].size(0)
             adj = pred_dict['adj'][-1]
             if train:
-                n_query = batch_data['q_label'].size(0)
-
-                s_label = batch_data['s_label'].unsqueeze(0).repeat(n_query, 1)
-                q_label = batch_data['q_label'].unsqueeze(1)
-                total_label = torch.cat((s_label, q_label), 1)
-                n_d = n_query * self.args.rel_edge * (n_support + 1)
-                label_edge = model.label2edge(total_label).reshape((n_d, -1))
-                pred_edge = adj.reshape((n_d, -1))
+                if flag:
+                    s_label = batch_data['s_label'].unsqueeze(0).repeat(n_query, 1)
+                    n_d = n_query * n_support
+                    label_edge = model.label2edge(s_label).reshape((n_d, -1))
+                    pred_edge = adj[:,:,:-1,:-1].reshape((n_d, -1))
+                else:
+                    s_label = batch_data['s_label'].unsqueeze(0).repeat(n_query, 1)
+                    q_label = batch_data['q_label'].unsqueeze(1)
+                    total_label = torch.cat((s_label, q_label), 1)
+                    label_edge = model.label2edge(total_label)[:,:,-1,:-1]
+                    pred_edge = adj[:,:,-1,:-1]
             else:
                 s_label = batch_data['s_label'].unsqueeze(0)
-                n_d = n_support * self.args.rel_edge
+                n_d = n_support
                 label_edge = model.label2edge(s_label).reshape((n_d, -1))
                 pred_edge = adj[:, :, :n_support, :n_support].mean(0).reshape((n_d, -1))
             adj_loss_val = F.mse_loss(pred_edge, label_edge)
@@ -242,35 +228,6 @@ class Meta_Trainer(nn.Module):
             losses_adapt += self.args.reg_adj * adj_loss_val
 
         return losses_adapt
-
-    def cal_adj_acc(self, pred_eval,model):
-        labels = pred_eval['sup_labels']
-        adj_list = pred_eval['adj']
-
-        cnt_sum, cnt_correct=0,0
-        for ii in range(len(adj_list)):
-            adj = adj_list[ii]
-            s_label = labels['support']
-            q_label = labels['query'][ii]
-            n_query = q_label.size(0)
-
-            s_label = s_label.unsqueeze(0).repeat(n_query, 1)
-            q_label = q_label.unsqueeze(1)
-            total_label = torch.cat((s_label, q_label), 1)
-            
-            label_edge = model.label2edge(total_label)
-            pred_edge = adj #/adj.sum(1)
-            pred_edge = torch.where(pred_edge>=0.5, torch.ones_like(pred_edge), pred_edge)
-            pred_edge = torch.where(pred_edge<0.5, torch.zeros_like(pred_edge), pred_edge)
-
-            cor = (pred_edge==label_edge).sum()
-            incor = (pred_edge!=label_edge).sum()
-
-            cnt_sum += (cor+incor)
-            cnt_correct += cor
-        
-        acc = cnt_correct / cnt_sum
-        return acc
 
     def train_step(self):
 
@@ -288,18 +245,18 @@ class Meta_Trainer(nn.Module):
         for k in range(self.update_step):
             losses_eval = []
             for task_id in task_id_list:
-                adapt_data, eval_data = data_batches[task_id]
+                train_data, _ = data_batches[task_id]
                 model = self.model.clone()
                 model.train()
                 adaptable_weights = self.get_adaptable_weights(model)
                 
                 for inner_step in range(self.inner_update_step):
-                    pred_adapt = self.get_prediction(model, adapt_data, train=True)
-                    loss_adapt = self.get_loss(model, adapt_data, pred_adapt, train=True)
-                    model.adapt(loss_adapt, adaptable_weights=adaptable_weights)
+                    pred_adapt = self.get_prediction(model, train_data, train=True)
+                    loss_adapt = self.get_loss(model, train_data, pred_adapt, train=True, flag = 1)
+                    model.adapt(loss_adapt, adaptable_weights = adaptable_weights)
 
-                pred_eval = self.get_prediction(model, eval_data, train=True)
-                loss_eval = self.get_loss(model, eval_data, pred_eval, train=True)
+                pred_eval = self.get_prediction(model, train_data, train=True)
+                loss_eval = self.get_loss(model, train_data, pred_eval, train=True, flag = 0)
 
                 losses_eval.append(loss_eval)
 
@@ -320,7 +277,6 @@ class Meta_Trainer(nn.Module):
     def test_step(self):
         step_results={'query_preds':[], 'query_labels':[], 'query_adj':[],'task_index':[]}
         auc_scores = []
-        adj_accs=[]
         for task_id in range(len(self.test_tasks)):
             adapt_data, eval_data = self.get_data_sample(task_id, train=False)
             model = self.model.clone()
@@ -328,12 +284,10 @@ class Meta_Trainer(nn.Module):
                 model.train()
                 
                 for i, batch in enumerate(adapt_data['data_loader']):
-                    if self.update_s_q:
-                        batch = batch.to(self.device)
-                        cur_adapt_data = {'s_data': adapt_data['s_data'], 's_label': adapt_data['s_label'],
+                    batch = batch.to(self.device)
+                    cur_adapt_data = {'s_data': adapt_data['s_data'], 's_label': adapt_data['s_label'],
                                         'q_data': batch, 'q_label': None}
-                    else:
-                        cur_adapt_data = {'data': batch, 'label': batch.y}
+
                     adaptable_weights = self.get_adaptable_weights(model)
                     pred_adapt = self.get_prediction(model, cur_adapt_data, train=True)
                     loss_adapt = self.get_loss(model, cur_adapt_data, pred_adapt, train=False)
@@ -348,19 +302,16 @@ class Meta_Trainer(nn.Module):
                 pred_eval = self.get_prediction(model, eval_data, train=False)
                 y_score = F.softmax(pred_eval['logits'],dim=-1).detach()[:,1]
                 y_true = pred_eval['labels']
-                if self.update_s_q and self.args.eval_support:
+                if self.args.eval_support:
                     y_s_score = F.softmax(pred_eval['s_logits'],dim=-1).detach()[:,1]
                     y_s_true = eval_data['s_label']
                     y_score=torch.cat([y_score, y_s_score])
                     y_true=torch.cat([y_true, y_s_true])
                 auc = auroc(y_score,y_true,pos_label=1).item()
 
-                adj_acc =self.cal_adj_acc(pred_eval,model).item()
-
             auc_scores.append(auc)
-            adj_accs.append(adj_acc)
 
-            print('Test Epoch:',self.train_epoch,', test for task:', task_id, ', AUC:', round(auc, 4), ' , ADJ-ACC:', round(adj_acc, 4))
+            print('Test Epoch:',self.train_epoch,', test for task:', task_id, ', AUC:', round(auc, 4))
             if self.args.save_logs:
                 step_results['query_preds'].append(y_score.cpu().numpy())
                 step_results['query_labels'].append(y_true.cpu().numpy())
@@ -369,12 +320,11 @@ class Meta_Trainer(nn.Module):
 
         mid_auc = np.median(auc_scores)
         avg_auc = np.mean(auc_scores)
-        adj_avg_acc = np.mean(adj_accs)
         self.best_auc = max(self.best_auc,avg_auc)
-        self.logger.append([self.train_epoch] + auc_scores  +[avg_auc, mid_auc,self.best_auc] + adj_accs +[adj_avg_acc], verbose=False)
+        self.logger.append([self.train_epoch] + auc_scores  +[avg_auc, mid_auc,self.best_auc], verbose=False)
 
         print('Test Epoch:', self.train_epoch, ', AUC_Mid:', round(mid_auc, 4), ', AUC_Avg: ', round(avg_auc, 4),
-              ', Best_Avg_AUC: ', round(self.best_auc, 4), ', ADJ-ACC_Avg: ', round(adj_avg_acc, 4),)
+              ', Best_Avg_AUC: ', round(self.best_auc, 4),)
         
         if self.args.save_logs:
             self.res_logs.append(step_results)
@@ -388,7 +338,6 @@ class Meta_Trainer(nn.Module):
 
     def save_result_log(self):
         joblib.dump(self.res_logs,self.args.trial_path+'/logs.pkl',compress=6)
-
 
     def conclude(self):
         df = self.logger.conclude()

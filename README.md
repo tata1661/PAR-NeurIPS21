@@ -42,17 +42,16 @@ Using the folllowing scripts on different datasets and methods:
  ```
 DATA=tox21 # training dataset
 TDATA=tox21  # testing  dataset
-setting=par
+setting=pre_par
 NS=10 # n-shot
 NQ=16 # n-query
 pretrain=1 # pretrain or training from scratch
 seed=0 # random seed
 
-nohup python -u main.py --epochs 1000 --eval_steps 10 --pretrained $pretrain \
+nohup python -u main.py --epochs 3000 --eval_steps 10 --pretrained $pretrain \
 --setting $setting --n-shot-train $NS  --n-shot-test $NS --n-query $NQ --dataset $DATA --test-dataset $TDATA --seed $seed \
 > nohup_${DATA}${TDATA}-${setting}_s${NS}q${NQ} 2>&1 &
-```
+ ```
 If you want to run other datasets, you only need to change `DATA` and `TDATA` in the above or in the [script_train.sh](script_train.sh). 
 Please change `NS` and `NQ` for different n-shot and n-query settings.
-
 

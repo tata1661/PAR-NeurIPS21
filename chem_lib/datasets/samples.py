@@ -128,49 +128,25 @@ def sample_inds(data, size):
         return random.sample(data, len_data) + sample_inds(data, size - len_data)
 
 
-def sample_datasets(data, dataset, task, n_shot, n_query):
+def sample_meta_datasets(data, dataset, task, n_shot, n_query):
     distri_list = obtain_distr_list(dataset)
     thresh = distri_list[task][0]
 
     neg_sample = sample_inds(range(0, thresh), n_shot)
     pos_sample = sample_inds(range(thresh, len(data)), n_shot)
 
-    s_list = neg_sample + pos_sample
-
-    l = [i for i in range(0, len(data)) if i not in s_list]
-    random.shuffle(l)
-    q_list = sample_inds(l, n_query)
-
-    s_data = data[torch.tensor(s_list)]
-    q_data = data[torch.tensor(q_list)]
-
-    return s_data, q_data
-
-
-def sample_meta_datasets(data, dataset, task, n_shot, n_query):
-    distri_list = obtain_distr_list(dataset)
-    thresh = distri_list[task][0]
-
-    neg_sample = sample_inds(range(0, thresh), 2 * n_shot)
-    pos_sample = sample_inds(range(thresh, len(data)), 2 * n_shot)
-
     s_list_1 = neg_sample[:n_shot] + pos_sample[:n_shot]
-    s_list_2 = neg_sample[n_shot:] + pos_sample[n_shot:]
 
-    l = [i for i in range(0, len(data)) if i not in s_list_1 + s_list_2]
+    l = [i for i in range(0, len(data)) if i not in s_list_1]
     random.shuffle(l)
-    q_sample = sample_inds(l, 2 * n_query)
+
+    q_sample = sample_inds(l, n_query)
     q_list_1 = q_sample[:n_query]
-    q_list_2 = q_sample[n_query:2 * n_query]
 
     s_adapt = data[torch.tensor(s_list_1)]
-    s_eval = data[torch.tensor(s_list_2)]
-
     q_adapt = data[torch.tensor(q_list_1)]
-    q_eval = data[torch.tensor(q_list_2)]
 
-    return s_adapt, q_adapt, s_eval, q_eval
-
+    return s_adapt, q_adapt
 
 def sample_test_datasets(data, dataset, task, n_shot, n_query, update_step=1):
     distri_list = obtain_distr_list(dataset)

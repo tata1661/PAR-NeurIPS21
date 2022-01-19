@@ -28,8 +28,8 @@ class ContextAwareRelationNet(nn.Module):
         self.mol_relation_type = args.rel_type
         self.rel_layer = args.rel_layer
         self.edge_type = args.rel_adj
-        self.edge_dim = args.rel_edge
         self.edge_activation = args.rel_act
+        self.cuda_num = args.cuda
 
         self.mol_encoder = GNN_Encoder(num_layer=args.enc_layer, emb_dim=args.emb_dim, JK=args.JK,
                                        drop_ratio=args.dropout, graph_pooling=args.enc_pooling, gnn_type=args.enc_gnn,
@@ -40,7 +40,7 @@ class ContextAwareRelationNet(nn.Module):
                 temp = model_file.split('/')
                 model_file = '/'.join(temp[:-1]) +'/'+args.enc_gnn +'_'+ temp[-1]
             print('load pretrained model from', model_file)
-            self.mol_encoder.from_pretrained(model_file)
+            self.mol_encoder.from_pretrained(model_file, self.cuda_num)
 
         if self.mol_relation_type not in ['par']:
             self.encode_projection = MLP(inp_dim=args.emb_dim, hidden_dim=args.map_dim, num_layers=args.map_layer,
@@ -55,7 +55,7 @@ class ContextAwareRelationNet(nn.Module):
             self.adapt_relation = TaskAwareRelation(inp_dim=inp_dim, hidden_dim=args.rel_hidden_dim,
                                                     num_layers=args.rel_layer, edge_n_layer=args.rel_edge_layer,
                                                     top_k=args.rel_k, res_alpha=args.rel_res,
-                                                    batch_norm=args.batch_norm,edge_dim=args.rel_edge, adj_type=args.rel_adj,
+                                                    batch_norm=args.batch_norm, adj_type=args.rel_adj,
                                                     activation=args.rel_act, node_concat=args.rel_node_concat,dropout=args.rel_dropout,
                                                     pre_dropout=args.rel_dropout2)
         else:
@@ -77,12 +77,9 @@ class ContextAwareRelationNet(nn.Module):
         edge = edge.unsqueeze(1)
         if self.edge_type == 'dist':
             edge = 1 - edge
-        if self.edge_dim == 2:
-            edge = torch.cat([edge, 1 - edge], 1)
 
         if mask_diag:
-            diag_mask = 1.0 - torch.eye(edge.size(2)).unsqueeze(0).unsqueeze(0).repeat(edge.size(0), self.edge_dim, 1, 1).to(
-                edge.device)
+            diag_mask = 1.0 - torch.eye(edge.size(2)).unsqueeze(0).unsqueeze(0).repeat(edge.size(0), 1, 1, 1).to(edge.device)
             edge=edge*diag_mask
         if self.edge_activation == 'softmax':
             edge = edge / edge.sum(-1).unsqueeze(-1)
@@ -109,20 +106,12 @@ class ContextAwareRelationNet(nn.Module):
     def forward(self, s_data, q_data, s_label=None, q_pred_adj=False):
         s_emb, s_node_emb = self.mol_encoder(s_data.x, s_data.edge_index, s_data.edge_attr, s_data.batch)
         q_emb, q_node_emb = self.mol_encoder(q_data.x, q_data.edge_index, q_data.edge_attr, q_data.batch)
-        if self.mol_relation_type!='par':
-            s_emb_map = self.encode_projection(s_emb)
-            q_emb_map = self.encode_projection(q_emb)
-        else:
-            s_emb_map,q_emb_map = self.encode_projection(s_emb,q_emb)
+
+        s_emb_map,q_emb_map = self.encode_projection(s_emb,q_emb)
 
         s_logits, q_logits, adj = self.relation_forward(s_emb_map, q_emb_map, s_label, q_pred_adj=q_pred_adj)
 
         return s_logits, q_logits, adj, s_node_emb
-
-    def forward_one_batch(self, data):
-        graph_emb, node_emb = self.mol_encoder(data.x, data.edge_index, data.edge_attr, data.batch)
-        logits = self.adapt_relation(graph_emb)
-        return logits, node_emb
 
     def forward_query_list(self, s_data, q_data_list, s_label=None, q_pred_adj=False):
         s_emb, _ = self.mol_encoder(s_data.x, s_data.edge_index, s_data.edge_attr, s_data.batch)
@@ -177,17 +166,3 @@ class ContextAwareRelationNet(nn.Module):
         y_true = torch.cat(y_true_list, 0)
         sup_labels={'support':s_data.y,'query':y_true_list}
         return s_logit, q_logits, y_true,adj_list,sup_labels
-
-    def forward_one_query_loader(self, data_loader,device='cpu'):
-        y_true_list=[]
-        graph_emb_list=[]
-        for data in data_loader:
-            data = data.to(device)
-            y_true_list.append(data.y)
-            graph_emb,_ = self.mol_encoder(data.x, data.edge_index, data.edge_attr, data.batch)
-            graph_emb_list.append(graph_emb)
-
-        logits_list = [self.adapt_relation(graph_emb) for graph_emb in graph_emb_list]
-        logits = torch.cat(logits_list, 0)
-        y_true = torch.cat(y_true_list, 0)
-        return logits,y_true

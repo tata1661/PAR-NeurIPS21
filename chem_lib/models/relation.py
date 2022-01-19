@@ -103,10 +103,9 @@ class ContextMLP(nn.Module):
         return all_emb, None
 
 class NodeUpdateNetwork(nn.Module):
-    def __init__(self, inp_dim, out_dim, n_layer=2, edge_dim=2, batch_norm=False, dropout=0.0):
+    def __init__(self, inp_dim, out_dim, n_layer=2, batch_norm=False, dropout=0.0):
         super(NodeUpdateNetwork, self).__init__()
         # set size
-        self.edge_dim = edge_dim
         num_dims_list = [out_dim] * n_layer  # [num_features * r for r in ratio]
         if n_layer > 1:
             num_dims_list[0] = 2 * out_dim
@@ -115,7 +114,7 @@ class NodeUpdateNetwork(nn.Module):
         layer_list = OrderedDict()
         for l in range(len(num_dims_list)):
             layer_list['conv{}'.format(l)] = nn.Conv2d(
-                in_channels=num_dims_list[l - 1] if l > 0 else (self.edge_dim + 1) * inp_dim,
+                in_channels=num_dims_list[l - 1] if l > 0 else (1 + 1) * inp_dim,
                 out_channels=num_dims_list[l],
                 kernel_size=1,
                 bias=False)
@@ -134,13 +133,13 @@ class NodeUpdateNetwork(nn.Module):
         num_data = node_feat.size(1)
 
         # get eye matrix (batch_size x 2 x node_size x node_size)
-        diag_mask = 1.0 - torch.eye(num_data).unsqueeze(0).unsqueeze(0).repeat(num_tasks, self.edge_dim, 1, 1).to(node_feat.device)
+        diag_mask = 1.0 - torch.eye(num_data).unsqueeze(0).unsqueeze(0).repeat(num_tasks, 1, 1, 1).to(node_feat.device)
 
         # set diagonal as zero and normalize
         edge_feat = F.normalize(edge_feat * diag_mask, p=1, dim=-1)
 
         # compute attention and aggregate
-        aggr_feat = torch.bmm(torch.cat(torch.split(edge_feat, 1, 1), self.edge_dim).squeeze(1), node_feat)
+        aggr_feat = torch.bmm(torch.cat(torch.split(edge_feat, 1, 1), 1).squeeze(1), node_feat)
 
         node_feat = torch.cat([node_feat, torch.cat(aggr_feat.split(num_data, 1), -1)], -1).transpose(1, 2)
 
@@ -151,11 +150,10 @@ class NodeUpdateNetwork(nn.Module):
 
 class EdgeUpdateNetwork(nn.Module):
     def __init__(self, in_features, hidden_features, n_layer=3, top_k=-1,
-                 edge_dim=2, batch_norm=False, dropout=0.0, adj_type='dist', activation='softmax'):
+                 batch_norm=False, dropout=0.0, adj_type='dist', activation='softmax'):
         super(EdgeUpdateNetwork, self).__init__()
         self.top_k = top_k
         self.adj_type = adj_type
-        self.edge_dim = edge_dim
         self.activation = activation
 
         num_dims_list = [hidden_features] * n_layer  # [num_features * r for r in ratio]
@@ -214,14 +212,7 @@ class EdgeUpdateNetwork(nn.Module):
         else:
             sim_val = sim_val * diag_mask
 
-        if self.edge_dim == 2:
-            if self.activation == 'softmax':
-                dsim_val = self.softmax_with_mask(1 - sim_val, diag_mask)
-            else:
-                dsim_val = (1 - sim_val) * diag_mask
-            adj_val = torch.cat([sim_val, dsim_val], 1)
-        else:
-            adj_val = sim_val
+        adj_val = sim_val
 
         if self.top_k > 0:
             n_q, n_edge, n1, n2 = adj_val.size()
@@ -231,7 +222,7 @@ class EdgeUpdateNetwork(nn.Module):
             mask = torch.zeros_like(adj_temp)
             mask = mask.scatter(1, indices, 1)
             mask = mask.reshape((n_q, n_edge, n1, n2))
-            mask = ((mask + mask.transpose(2,3)) > 0).type(torch.float32)
+            # mask = ((mask + mask.transpose(2,3)) > 0).type(torch.float32)
             if self.activation == 'softmax':
                 adj_val = self.softmax_with_mask(adj_val, mask)
             else:
@@ -243,7 +234,7 @@ class EdgeUpdateNetwork(nn.Module):
 class TaskAwareRelation(nn.Module):
     def __init__(self, inp_dim, hidden_dim, num_layers, edge_n_layer, num_class=2,
                 res_alpha=0., top_k=-1, node_concat=True, batch_norm=False, dropout=0.0,
-                 edge_dim=2, adj_type='sim', activation='softmax',pre_dropout=0.0):
+                 adj_type='sim', activation='softmax',pre_dropout=0.0):
         super(TaskAwareRelation, self).__init__()
         self.inp_dim = inp_dim
         self.hidden_dim = hidden_dim
@@ -259,11 +250,10 @@ class TaskAwareRelation(nn.Module):
             self.predrop1 = nn.Dropout(p=self.pre_dropout)
         for i in range(self.num_layers):
             module_w = EdgeUpdateNetwork(in_features=gnn_inp_dim, hidden_features=hidden_dim, n_layer=edge_n_layer,
-                                         top_k=top_k,
-                                         edge_dim=edge_dim, batch_norm=batch_norm, adj_type=adj_type,
+                                         top_k=top_k, batch_norm=batch_norm, adj_type=adj_type,
                                          activation=activation, dropout=dropout if i < self.num_layers - 1 else 0.0)
             module_l = NodeUpdateNetwork(inp_dim=gnn_inp_dim, out_dim=hidden_dim, n_layer=node_n_layer,
-                                         edge_dim=edge_dim, batch_norm=batch_norm,
+                                          batch_norm=batch_norm,
                                          dropout=dropout if i < self.num_layers - 1 else 0.0)
             self.add_module('edge_layer{}'.format(i), module_w)
             self.add_module('node_layer{}'.format(i), module_l)
@@ -310,12 +300,12 @@ class TaskAwareRelation(nn.Module):
         node_feat = self.fc1(node_feat)
         node_feat = self.res_alpha * all_emb +  node_feat
 
-        s_feat = node_feat[:, :-1, :].mean(0)
+        s_feat = node_feat[:, :-1, :]
         q_feat = node_feat[:, -1, :]
 
         s_logits = self.fc2(s_feat)
         q_logits = self.fc2(q_feat)
         if return_emb:
-            return s_logits, q_logits, edge_feat_list, s_feat,q_feat
+            return s_logits, q_logits, edge_feat_list, s_feat, q_feat
         else:
             return s_logits, q_logits, edge_feat_list
