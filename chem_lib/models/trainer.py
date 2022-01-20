@@ -107,21 +107,6 @@ class Meta_Trainer(nn.Module):
             eval_data = { }
         else:
             task = self.test_tasks[task_id]
-            if 'train' in self.dataset:
-                dataset = self.preload_test_data[task]
-                if self.args.support_valid:
-                    val_dataset = self.preload_valid_data[task]
-                    data_name = self.dataset.replace('train','valid')
-                else:
-                    val_dataset = self.preload_train_data[task]
-                    data_name =self.dataset
-                s_data, _, q_data_adapt = sample_test_datasets(val_dataset, data_name, task, self.n_shot_test, self.n_query, self.update_step_test)
-                s_data = self.loader_to_samples(s_data)
-                q_loader = DataLoader(dataset, batch_size=self.n_query, shuffle=True, num_workers=0)
-                q_loader_adapt = DataLoader(q_data_adapt, batch_size=self.n_query, shuffle=True, num_workers=0)
-                adapt_data = {'s_data': s_data, 's_label': s_data.y, 'data_loader': q_loader_adapt}
-                eval_data = {'s_data': s_data, 's_label': s_data.y, 'data_loader': q_loader}
-                return adapt_data, eval_data
             if task in self.preload_test_data:
                 dataset = self.preload_test_data[task]
             else:
